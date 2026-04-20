@@ -222,7 +222,7 @@ def run_calculation(gpx_bytes, filename, start_gap, end_gap, smooth, splits):
                 dt = cum_rec[i] - cum_rec[i - 1]
                 dd = cum_dist[i] - cum_dist[i - 1]
                 raw_rec_pace.append(dt / dd * 1000 if dd > 0 and dt > 0 else raw_rec_pace[-1])
-        smooth_rec_pace = smooth_elevation(raw_rec_pace, window=60)
+        smooth_rec_pace = smooth_elevation(raw_rec_pace, sigma=30)  # index-based, no distances
     else:
         smooth_rec_pace = None
 
@@ -444,10 +444,10 @@ HTML = """<!DOCTYPE html>
 
             <div class="mb-4">
               <label class="form-label fw-semibold">Elevation smoothing
-                <span class="text-muted fw-normal">(points)</span>
+                <span class="text-muted fw-normal">(metres σ)</span>
               </label>
               <input type="number" name="smooth" class="form-control"
-                     value="{{ form.smooth }}" min="1" max="200">
+                     value="{{ form.smooth }}" min="1" max="500">
             </div>
 
             <button type="submit" class="btn btn-primary w-100 fw-semibold">
@@ -655,6 +655,13 @@ HTML = """<!DOCTYPE html>
   const eleMax = Math.max(...profEle);
   const elePad = (eleMax - eleMin) * 0.12;
 
+  // Pace axis bounds — must be computed from actual data so the scale
+  // tightens/widens correctly when the smoothing setting changes.
+  const allProfPace = [...profPace, ...profTarget, ...(profRecPace || [])];
+  const paceMin = Math.min(...allProfPace);
+  const paceMax = Math.max(...allProfPace);
+  const pacePad = (paceMax - paceMin) * 0.08;
+
   new Chart(document.getElementById('profileChart'), {
     type: 'line',
     data: {
@@ -737,6 +744,8 @@ HTML = """<!DOCTYPE html>
         yPace: {
           type: 'linear', position: 'right',
           reverse: true,
+          min: paceMin - pacePad,
+          max: paceMax + pacePad,
           title: { display: true, text: 'Pace (min/km)' },
           ticks: { callback: fmtPace },
           grid: { drawOnChartArea: false },
@@ -873,7 +882,7 @@ HTML = """<!DOCTYPE html>
 @app.route("/", methods=["GET", "POST"])
 def index():
     form = {
-        "start_gap": "6.0", "end_gap": "", "splits": "1", "smooth": "15",
+        "start_gap": "6.0", "end_gap": "", "splits": "1", "smooth": "50",
         "file_token": "", "filename": "",
     }
     results = None
@@ -883,7 +892,7 @@ def index():
         form["start_gap"]  = request.form.get("start_gap",  "6.0").strip()
         form["end_gap"]    = request.form.get("end_gap",    "").strip()
         form["splits"]     = request.form.get("splits",     "1").strip()
-        form["smooth"]     = request.form.get("smooth",     "15").strip()
+        form["smooth"]     = request.form.get("smooth",     "50").strip()
         form["file_token"] = request.form.get("file_token", "").strip()
 
         file = request.files.get("gpx_file")
@@ -907,7 +916,7 @@ def index():
             try:
                 start_gap = float(form["start_gap"])
                 end_gap   = float(form["end_gap"]) if form["end_gap"] else None
-                smooth    = int(form["smooth"])
+                smooth    = float(form["smooth"])
                 splits    = [float(x) for x in form["splits"].split()]
                 if not splits:
                     raise ValueError("Empty splits value.")

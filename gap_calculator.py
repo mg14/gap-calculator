@@ -161,15 +161,45 @@ def parse_recorded_times(pts_full):
 # Elevation smoothing
 # ---------------------------------------------------------------------------
 
-def smooth_elevation(values, window):
-    """Centred moving-average over `window` points to reduce GPS noise."""
+def smooth_elevation(values, sigma, distances=None):
+    """Gaussian kernel smoothing.
+
+    If `distances` (cumulative metres, same length as `values`) is given,
+    `sigma` is the kernel standard deviation in metres — correct for non-uniform
+    GPS point spacing.  Otherwise `sigma` is in array-index units (used for
+    pace-array smoothing where uniform spacing is assumed).
+
+    Kernel is truncated at ±3σ; bisect is used to find the window bounds
+    efficiently when distances are provided.
+    """
     n = len(values)
-    hw = max(1, window // 2)
-    return [
-        sum(values[max(0, i - hw): min(n, i + hw + 1)])
-        / len(values[max(0, i - hw): min(n, i + hw + 1)])
-        for i in range(n)
-    ]
+    result = []
+    if distances is not None:
+        sigma = max(1.0, sigma)
+        cutoff = 3.0 * sigma
+        for i in range(n):
+            d_i = distances[i]
+            lo = bisect.bisect_left(distances, d_i - cutoff)
+            hi = bisect.bisect_right(distances, d_i + cutoff)
+            total_w = total_v = 0.0
+            for j in range(lo, hi):
+                w = math.exp(-0.5 * ((distances[j] - d_i) / sigma) ** 2)
+                total_w += w
+                total_v += w * values[j]
+            result.append(total_v / total_w)
+    else:
+        sigma = max(1.0, sigma)
+        radius = int(math.ceil(3.0 * sigma))
+        for i in range(n):
+            lo = max(0, i - radius)
+            hi = min(n, i + radius + 1)
+            total_w = total_v = 0.0
+            for j in range(lo, hi):
+                w = math.exp(-0.5 * ((j - i) / sigma) ** 2)
+                total_w += w
+                total_v += w * values[j]
+            result.append(total_v / total_w)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +225,7 @@ def fmt_pace(seconds_per_km):
 # Core calculation
 # ---------------------------------------------------------------------------
 
-def build_profile(points, start_gap_min_km, smooth_window, end_gap_min_km=None):
+def build_profile(points, start_gap_min_km, smooth_sigma_m, end_gap_min_km=None):
     """
     Walk every track segment and return parallel arrays indexed by track point:
         cum_dist  – cumulative horizontal distance (m)
@@ -207,19 +237,20 @@ def build_profile(points, start_gap_min_km, smooth_window, end_gap_min_km=None):
 
     If end_gap_min_km is given the target GAP increases linearly from
     start_gap_min_km at the start to end_gap_min_km at the finish.
+    smooth_sigma_m is the Gaussian kernel sigma in metres.
     """
     lats = [p[0] for p in points]
     lons = [p[1] for p in points]
-    eles = smooth_elevation([p[2] for p in points], smooth_window)
 
-    # Pre-compute total distance when variable GAP is requested
-    if end_gap_min_km is not None:
-        total_horiz = sum(
-            haversine(lats[i - 1], lons[i - 1], lats[i], lons[i])
-            for i in range(1, len(points))
-        )
-    else:
-        total_horiz = None
+    # Pre-compute cumulative horizontal distances so the Gaussian kernel
+    # uses real spatial separation rather than point indices.
+    cum_horiz = [0.0]
+    for i in range(1, len(points)):
+        cum_horiz.append(cum_horiz[-1] + haversine(lats[i - 1], lons[i - 1], lats[i], lons[i]))
+
+    eles = smooth_elevation([p[2] for p in points], smooth_sigma_m, distances=cum_horiz)
+
+    total_horiz = cum_horiz[-1] if end_gap_min_km is not None else None
 
     cum_dist = [0.0]
     cum_time = [0.0]
@@ -301,7 +332,7 @@ def elevation_stats(cum_dist, cum_ele, start_d, end_d):
 # Virtual training partner
 # ---------------------------------------------------------------------------
 
-def compute_point_times(points, start_gap_min_km, smooth_window, end_gap_min_km=None):
+def compute_point_times(points, start_gap_min_km, smooth_sigma_m, end_gap_min_km=None):
     """Return elapsed time in seconds for every point in `points`.
 
     Mirrors build_profile's logic exactly so the timestamps are consistent
@@ -310,15 +341,14 @@ def compute_point_times(points, start_gap_min_km, smooth_window, end_gap_min_km=
     """
     lats = [p[0] for p in points]
     lons = [p[1] for p in points]
-    eles = smooth_elevation([p[2] for p in points], smooth_window)
 
-    if end_gap_min_km is not None:
-        total_horiz = sum(
-            haversine(lats[i - 1], lons[i - 1], lats[i], lons[i])
-            for i in range(1, len(points))
-        )
-    else:
-        total_horiz = None
+    cum_horiz = [0.0]
+    for i in range(1, len(points)):
+        cum_horiz.append(cum_horiz[-1] + haversine(lats[i - 1], lons[i - 1], lats[i], lons[i]))
+
+    eles = smooth_elevation([p[2] for p in points], smooth_sigma_m, distances=cum_horiz)
+
+    total_horiz = cum_horiz[-1] if end_gap_min_km is not None else None
 
     elapsed = [0.0]
     cum_d = cum_t = 0.0
@@ -532,8 +562,8 @@ def main():
         help="Target Grade Adjusted Pace in min/km (default: 6.0)",
     )
     ap.add_argument(
-        "--smooth", type=int, default=15, metavar="N",
-        help="Elevation smoothing window in track-points (default: 15, increase for noisy GPS)",
+        "--smooth", type=float, default=50, metavar="M",
+        help="Gaussian smoothing sigma in metres (default: 50, increase for noisy GPS)",
     )
     ap.add_argument(
         "--splits", type=float, nargs="+", default=[1.0], metavar="KM",
