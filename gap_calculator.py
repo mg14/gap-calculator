@@ -170,23 +170,41 @@ def smooth_elevation(values, sigma, distances=None):
     pace-array smoothing where uniform spacing is assumed).
 
     Kernel is truncated at ±3σ; bisect is used to find the window bounds
-    efficiently when distances are provided.
+    efficiently.
+
+    Density correction: each point is weighted by its local track spacing so
+    that GPS jitter clusters (many points at the same location) get the same
+    total kernel weight as a single normally-spaced point.  Without this,
+    a stopped-GPS cluster would bias the smoothed elevation over a wide radius.
     """
     n = len(values)
     result = []
     if distances is not None:
         sigma = max(1.0, sigma)
         cutoff = 3.0 * sigma
+
+        # Local spacing: point j represents the track length between its
+        # midpoints to neighbours.  Boundary points use a one-sided interval.
+        spacing = []
+        for j in range(n):
+            if j == 0:
+                s = distances[1] - distances[0] if n > 1 else 1.0
+            elif j == n - 1:
+                s = distances[-1] - distances[-2]
+            else:
+                s = (distances[j + 1] - distances[j - 1]) / 2.0
+            spacing.append(max(1e-6, s))
+
         for i in range(n):
             d_i = distances[i]
             lo = bisect.bisect_left(distances, d_i - cutoff)
             hi = bisect.bisect_right(distances, d_i + cutoff)
             total_w = total_v = 0.0
             for j in range(lo, hi):
-                w = math.exp(-0.5 * ((distances[j] - d_i) / sigma) ** 2)
+                w = math.exp(-0.5 * ((distances[j] - d_i) / sigma) ** 2) * spacing[j]
                 total_w += w
                 total_v += w * values[j]
-            result.append(total_v / total_w)
+            result.append(total_v / total_w if total_w > 0 else values[i])
     else:
         sigma = max(1.0, sigma)
         radius = int(math.ceil(3.0 * sigma))
