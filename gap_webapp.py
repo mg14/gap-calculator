@@ -342,6 +342,7 @@ def run_calculation(gpx_bytes, filename, start_gap, end_gap, smooth, splits):
         # Virtual partner download
         "download_token":    dl_token,
         "download_filename": virt_name,
+        "csv_filename":      os.path.splitext(filename)[0] + "_splits.csv",
     }
 
 
@@ -885,28 +886,28 @@ HTML = """<!DOCTYPE html>
 
   map.fitBounds(trackLine.getBounds(), { padding: [16, 16] });
 
-  /* ── CSV export ── */
-  window.exportCSV = function () {
-    const tbl = document.getElementById('splitsTable');
-    const rows = [...tbl.querySelectorAll('tr')];
-    const csv = rows.map(tr =>
-      [...tr.querySelectorAll('th,td')]
-        .map(cell => {
-          // Strip inner HTML (badge spans, colour swatches) — text only
-          const txt = cell.innerText.trim().replace(/"/g, '""');
-          return `"${txt}"`;
-        })
-        .join(',')
-    ).join('\n');
-
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = '{{ results.filename | replace(".gpx", "") }}_splits.csv';
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
 }());
+
+function exportCSV() {
+  const tbl = document.getElementById('splitsTable');
+  const rows = [...tbl.querySelectorAll('tr')];
+  const csv = rows.map(tr =>
+    [...tr.querySelectorAll('th,td')]
+      .map(cell => {
+        // Strip inner HTML (badge spans, colour swatches) — text only
+        const txt = cell.innerText.trim().replace(/"/g, '""');
+        return `"${txt}"`;
+      })
+      .join(',')
+  ).join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = {{ results.csv_filename | tojson }};
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 </script>
 {% endif %}
 
