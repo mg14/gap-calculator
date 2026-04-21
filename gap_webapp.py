@@ -132,8 +132,9 @@ def run_calculation(gpx_bytes, filename, start_gap, end_gap, smooth, splits):
             rec_t1    = interp_time(cum_dist, cum_rec, dist_m)
             rec_split = rec_t1 - rec_t0
             rec_pace_s = rec_split / (seg_d / 1000) if seg_d > 0 else 0.0
-            factor     = gap_speed_factor(grade_pct / 100)
-            rec_gap_s  = rec_pace_s / factor if factor > 0 else rec_pace_s
+            # GAP: scale target by how much faster/slower the split was run
+            # vs the terrain-integrated target time.  Avoids avg-grade error.
+            rec_gap_s  = local_target_s * rec_split / split if split > 0 else local_target_s
             diff_s     = rec_gap_s - local_target_s   # GAP vs GAP target
         else:
             rec_pace_s = rec_gap_s = diff_s = None
@@ -177,8 +178,7 @@ def run_calculation(gpx_bytes, filename, start_gap, end_gap, smooth, splits):
             rec_t0    = interp_time(cum_dist, cum_rec, prev_dist)
             rec_split = cum_rec[-1] - rec_t0
             rec_pace_s = rec_split / (remainder / 1000) if remainder > 0 else 0.0
-            factor     = gap_speed_factor(grade_pct / 100)
-            rec_gap_s  = rec_pace_s / factor if factor > 0 else rec_pace_s
+            rec_gap_s  = local_target_s * rec_split / split if split > 0 else local_target_s
             diff_s     = rec_gap_s - local_target_s
         else:
             rec_pace_s = rec_gap_s = diff_s = None
@@ -211,7 +211,7 @@ def run_calculation(gpx_bytes, filename, start_gap, end_gap, smooth, splits):
     # cum_pace is in min/km; convert to s/km for chart
     cum_pace_s = [p * 60 for p in cum_pace]
 
-    # Per-point recorded pace (s/km), smoothed to reduce GPS jitter
+    # Per-point recorded pace (s/km) – raw, no smoothing applied
     if cum_rec is not None:
         raw_rec_pace = []
         for i in range(len(cum_dist)):
@@ -222,13 +222,13 @@ def run_calculation(gpx_bytes, filename, start_gap, end_gap, smooth, splits):
                 dt = cum_rec[i] - cum_rec[i - 1]
                 dd = cum_dist[i] - cum_dist[i - 1]
                 raw_rec_pace.append(dt / dd * 1000 if dd > 0 and dt > 0 else raw_rec_pace[-1])
-        smooth_rec_pace = smooth_elevation(raw_rec_pace, sigma=30)  # index-based, no distances
+        profile_rec_pace_raw = raw_rec_pace
     else:
-        smooth_rec_pace = None
+        profile_rec_pace_raw = None
 
-    if smooth_rec_pace is not None:
+    if profile_rec_pace_raw is not None:
         ds_dist, ds_ele, ds_pace, ds_rec = _downsample(
-            [cum_dist, cum_ele, cum_pace_s, smooth_rec_pace], n=400
+            [cum_dist, cum_ele, cum_pace_s, profile_rec_pace_raw], n=400
         )
         profile_rec_pace_s = [round(p, 1) for p in ds_rec]
     else:
@@ -388,7 +388,7 @@ HTML = """<!DOCTYPE html>
 <nav class="navbar mb-4" style="background:#1a1a2e">
   <div class="container-fluid px-4">
     <div class="navbar-brand text-white fw-bold">
-      BZHD GAP Calculator <span class="ms-2">Grade Adjusted Pace</span>
+      BZHD GAP Calculator <span class="ms-2">Goat adjusted pace for your next race</span>
     </div>
     <button id="sidebarCollapse" class="btn btn-outline-light btn-sm"
             onclick="document.getElementById('sidebarPanel').classList.toggle('show')">

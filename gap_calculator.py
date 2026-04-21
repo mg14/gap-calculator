@@ -130,12 +130,16 @@ def parse_recorded_times(pts_full):
     dts = []
     for _, _, _, t_str in pts_full:
         if t_str:
-            s = t_str.rstrip("Z").split(".")[0]
+            s = t_str.rstrip("Z")
             try:
-                dts.append(datetime.strptime(s, "%Y-%m-%dT%H:%M:%S")
+                dts.append(datetime.strptime(s, "%Y-%m-%dT%H:%M:%S.%f")
                            .replace(tzinfo=timezone.utc))
             except ValueError:
-                dts.append(None)
+                try:
+                    dts.append(datetime.strptime(s.split(".")[0], "%Y-%m-%dT%H:%M:%S")
+                               .replace(tzinfo=timezone.utc))
+                except ValueError:
+                    dts.append(None)
         else:
             dts.append(None)
 
@@ -413,7 +417,8 @@ def write_virtual_gpx(points_with_time, elapsed, output_path=None,
         gap_label += f" \u2192 {fmt_pace(end_gap_min_km * 60)}"
 
     def iso(dt):
-        return dt.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+        ms = dt.microsecond // 1000
+        return dt.strftime("%Y-%m-%dT%H:%M:%S") + f".{ms:03d}Z"
 
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
