@@ -673,14 +673,12 @@ HTML = """<!DOCTYPE html>
   const eleMax = Math.max(...profEle);
   const elePad = (eleMax - eleMin) * 0.12;
 
-  // Pace axis bounds — must be computed from actual data so the scale
-  // tightens/widens correctly when the smoothing setting changes.
   const allProfPace = [...profPace, ...profTarget, ...(profRecPace || [])];
   const paceMin = Math.min(...allProfPace);
   const paceMax = Math.max(...allProfPace);
-  const pacePad = (paceMax - paceMin) * 0.08;
+  const pacePad = Math.max((paceMax - paceMin) * 0.08, 10);
 
-  new Chart(document.getElementById('profileChart'), {
+  try { new Chart(document.getElementById('profileChart'), {
     type: 'line',
     data: {
       labels: profDist,
@@ -697,7 +695,7 @@ HTML = """<!DOCTYPE html>
           order: 3,
         },
         {
-          label: 'Actual pace',
+          label: 'Target pace',
           data: profPace,
           fill: false,
           borderColor: 'rgba(239,68,68,0.85)',
@@ -770,21 +768,23 @@ HTML = """<!DOCTYPE html>
         },
       },
     },
-  });
+  }); } catch(e) { console.error('Profile chart:', e); }
 
   /* ── 2. Recorded vs Target comparison chart ── */
   {% if results.has_recorded %}
-  {
+  try {
     const compLabels   = {{ results.chart_labels   | safe }};
     const compRecorded = {{ results.chart_recorded | safe }};
     const compRecGap   = {{ results.chart_rec_gap  | safe }};
     const compTargets  = {{ results.chart_targets  | safe }};
 
-    const validRec = compRecorded.filter(v => v !== null);
-    const validGap = compRecGap.filter(v => v !== null);
+    const validRec = (compRecorded || []).filter(v => v !== null);
+    const validGap = (compRecGap   || []).filter(v => v !== null);
     const compAll  = [...validRec, ...validGap, ...compTargets];
-    const compMin  = Math.max(0, Math.min(...compAll) * 0.92);
-    const compMax  = Math.max(...compAll) * 1.08;
+    const rawMin   = compAll.length ? Math.min(...compAll) : 0;
+    const rawMax   = compAll.length ? Math.max(...compAll) : 600;
+    const compMin  = Math.max(0, rawMin * 0.92);
+    const compMax  = Math.max(rawMax * 1.08, compMin + 20);
 
     new Chart(document.getElementById('compChart'), {
       type: 'bar',
@@ -794,7 +794,8 @@ HTML = """<!DOCTYPE html>
           {
             label: 'Recorded pace',
             data: compRecorded,
-            backgroundColor: compRecGap.map((gap, i) => {
+            base: compMax,
+            backgroundColor: (compRecGap || []).map((gap, i) => {
               if (gap === null) return 'rgba(156,163,175,0.5)';
               const diff = gap - compTargets[i];
               if (diff < -15) return 'rgba(29,78,216,0.75)';
@@ -855,39 +856,40 @@ HTML = """<!DOCTYPE html>
         },
       },
     });
-  }
+  } catch(e) { console.error('Comparison chart:', e); }
   {% endif %}
 
   /* ── 4. Leaflet map ── */
-  const center   = {{ results.map_center   | safe }};
-  const track    = {{ results.map_track    | safe }};
-  const segments = {{ results.map_segments | safe }};
+  try {
+    const center   = {{ results.map_center   | safe }};
+    const track    = {{ results.map_track    | safe }};
+    const segments = {{ results.map_segments | safe }};
 
-  const map = L.map('map').setView(center, 13);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
-    maxZoom: 19,
-  }).addTo(map);
+    const map = L.map('map').setView(center, 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+    }).addTo(map);
 
-  // Thin grey underlay for the full track
-  const trackLine = L.polyline(track, { color: '#94a3b8', weight: 2, opacity: 0.5 });
-  trackLine.addTo(map);
+    const trackLine = L.polyline(track, { color: '#94a3b8', weight: 2, opacity: 0.5 });
+    trackLine.addTo(map);
 
-  // Coloured split segments
-  segments.forEach(seg => {
-    L.polyline(seg.coords, { color: seg.color, weight: 5, opacity: 0.9 })
-      .addTo(map)
-      .bindPopup(
-        `<strong>${seg.label} km</strong><br>` +
-        `Pace: ${seg.pace}<br>Grade: ${seg.grade}<br>` +
-        `Gain: ${seg.gain} m &nbsp; Loss: ${seg.loss} m`
-      );
-  });
+    segments.forEach(seg => {
+      L.polyline(seg.coords, { color: seg.color, weight: 5, opacity: 0.9 })
+        .addTo(map)
+        .bindPopup(
+          `<strong>${seg.label} km</strong><br>` +
+          `Pace: ${seg.pace}<br>Grade: ${seg.grade}<br>` +
+          `Gain: ${seg.gain} m &nbsp; Loss: ${seg.loss} m`
+        );
+    });
 
-  map.fitBounds(trackLine.getBounds(), { padding: [16, 16] });
+    map.fitBounds(trackLine.getBounds(), { padding: [16, 16] });
+  } catch(e) { console.error('Map:', e); }
 
 }());
-
+</script>
+<script>
 function exportCSV() {
   const tbl = document.getElementById('splitsTable');
   const rows = [...tbl.querySelectorAll('tr')];
