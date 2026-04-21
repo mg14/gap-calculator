@@ -354,7 +354,7 @@ HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GAP Calculator</title>
+  <title>BZHD GAP Calculator</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
@@ -372,6 +372,14 @@ HTML = """<!DOCTYPE html>
     .navbar-brand span { opacity:.65; font-weight:400; font-size:.9rem; }
     .legend-dot { display:inline-block; width:12px; height:12px;
                   border-radius:50%; margin-right:4px; }
+    /* Sidebar collapse on mobile */
+    #sidebarCollapse { display:none; }
+    @media (max-width: 767px) {
+      #sidebarCollapse { display:block; }
+      #sidebarPanel { display:none; }
+      #sidebarPanel.show { display:block; }
+      .sidebar { position:static; }
+    }
   </style>
 </head>
 <body>
@@ -379,8 +387,12 @@ HTML = """<!DOCTYPE html>
 <nav class="navbar mb-4" style="background:#1a1a2e">
   <div class="container-fluid px-4">
     <div class="navbar-brand text-white fw-bold">
-      GAP Calculator <span class="ms-2">Grade Adjusted Pace</span>
+      BZHD GAP Calculator <span class="ms-2">Grade Adjusted Pace</span>
     </div>
+    <button id="sidebarCollapse" class="btn btn-outline-light btn-sm"
+            onclick="document.getElementById('sidebarPanel').classList.toggle('show')">
+      &#9776; Settings
+    </button>
   </div>
 </nav>
 
@@ -391,7 +403,7 @@ HTML = """<!DOCTYPE html>
     <div class="col-lg-3 col-md-4 sidebar">
       <div class="card">
         <div class="card-header fw-semibold">Settings</div>
-        <div class="card-body">
+        <div id="sidebarPanel" class="card-body">
           <form method="post" enctype="multipart/form-data">
 
             <div class="mb-3">
@@ -560,9 +572,14 @@ HTML = """<!DOCTYPE html>
 
       <!-- Table -->
       <div class="card">
-        <div class="card-header fw-semibold">Split Details</div>
+        <div class="card-header fw-semibold d-flex align-items-center justify-content-between">
+          Split Details
+          <button onclick="exportCSV()" class="btn btn-outline-secondary btn-sm">
+            &#8659; Export CSV
+          </button>
+        </div>
         <div class="table-responsive">
-          <table class="table table-hover mb-0">
+          <table id="splitsTable" class="table table-hover mb-0">
             <thead class="table-dark">
               <tr>
                 <th>km</th><th>Split</th><th>Pace</th><th>Elapsed</th>
@@ -867,6 +884,28 @@ HTML = """<!DOCTYPE html>
   });
 
   map.fitBounds(trackLine.getBounds(), { padding: [16, 16] });
+
+  /* ── CSV export ── */
+  window.exportCSV = function () {
+    const tbl = document.getElementById('splitsTable');
+    const rows = [...tbl.querySelectorAll('tr')];
+    const csv = rows.map(tr =>
+      [...tr.querySelectorAll('th,td')]
+        .map(cell => {
+          // Strip inner HTML (badge spans, colour swatches) — text only
+          const txt = cell.innerText.trim().replace(/"/g, '""');
+          return `"${txt}"`;
+        })
+        .join(',')
+    ).join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = '{{ results.filename | replace(".gpx", "") }}_splits.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
 }());
 </script>
 {% endif %}
